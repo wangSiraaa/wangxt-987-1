@@ -184,7 +184,7 @@ interface DataState {
   createBatch: (data: Partial<Batch>) => Promise<boolean>
   updateBatch: (id: string, data: Partial<Batch>) => Promise<boolean>
   createSchedule: (data: Partial<Schedule>) => Promise<boolean>
-  assignSeats: (scheduleId: string, registrationIds: string[]) => Promise<boolean>
+  assignSeats: (scheduleId: string, registrationIds: string[]) => Promise<{ success: boolean; errors?: string[]; warnings?: string[] }>
   expandCapacity: (scheduleId: string, newCapacity: number, reason: string) => Promise<boolean>
   adjustSeat: (data: any) => Promise<boolean>
   validateSchedule: (registrationIds: string[], target: any, options?: any) => Promise<{ valid: boolean; errors: string[]; warnings: string[] } | null>
@@ -319,8 +319,16 @@ export const useDataStore = create<DataState>((set, get) => ({
   assignSeats: async (scheduleId, registrationIds) => {
     set({ loading: true, error: null })
     const res = await api.post<any>(`/schedules/${scheduleId}/assign`, { registration_ids: registrationIds })
-    if (res.success) { set({ loading: false }); return true }
-    set({ error: res.error || '分配座位失败', loading: false }); return false
+    if (res.success) {
+      set({ loading: false })
+      return { success: true, warnings: res.data?.warnings || [] }
+    }
+    set({ error: res.error || '分配座位失败', loading: false })
+    return {
+      success: false,
+      errors: res.errors || [res.error || '分配座位失败'],
+      warnings: res.warnings || []
+    }
   },
 
   expandCapacity: async (scheduleId, newCapacity, reason) => {

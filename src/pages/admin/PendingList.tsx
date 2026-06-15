@@ -48,13 +48,24 @@ export default function PendingList() {
 
   const onAssign = async () => {
     if (!targetScheduleId || selected.length === 0) return
-    const ok = await assignSeats(targetScheduleId, selected)
-    if (ok) {
+    if (!validationResult || !validationResult.valid) {
+      setValidationResult({ valid: false, errors: ['请先点击"校验排考"按钮进行验证，验证通过后方可确认分配'], warnings: [] })
+      return
+    }
+    const result = await assignSeats(targetScheduleId, selected)
+    if (result.success) {
       setScheduleModal(false)
       setTargetScheduleId('')
       setSelected([])
       setValidationResult(null)
       fetchPendingRegistrations()
+      fetchSchedules()
+    } else {
+      setValidationResult({
+        valid: false,
+        errors: result.errors || ['分配座位失败'],
+        warnings: result.warnings || []
+      })
     }
   }
 
@@ -182,7 +193,7 @@ export default function PendingList() {
 
             <div className="flex gap-3 mt-6">
               <button className="flex-1 py-2 bg-slate-100 rounded-lg hover:bg-slate-200 text-sm" onClick={() => setScheduleModal(false)}>取消</button>
-              <button className="flex-1 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm" onClick={onAssign} disabled={!targetScheduleId || selected.length === 0}>
+              <button className="flex-1 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm disabled:bg-slate-300 disabled:cursor-not-allowed" onClick={onAssign} disabled={!targetScheduleId || selected.length === 0 || !validationResult || !validationResult.valid}>
                 确认分配
               </button>
             </div>

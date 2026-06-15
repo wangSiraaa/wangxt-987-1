@@ -235,20 +235,58 @@ router.post('/validate', authenticateToken, requireRole('exam_admin', 'system'),
     const body = req.body
     const registration_ids = body.registration_ids || body.registrationIds
     const rawTarget = body.target || {}
-    const target: any = {
-      exam_room_id: rawTarget.exam_room_id || rawTarget.examRoom || rawTarget.exam_room,
-      exam_date: rawTarget.exam_date || rawTarget.examDate,
-      start_time: rawTarget.start_time || rawTarget.examTime || rawTarget.startTime,
-      end_time: rawTarget.end_time || rawTarget.endTime,
-      subject_id: rawTarget.subject_id || rawTarget.subject,
-      skill_level_id: rawTarget.skill_level_id || rawTarget.skill_level || rawTarget.skillLevel,
-      proctor_id: rawTarget.proctor_id || rawTarget.proctorId || rawTarget.proctor,
+    const db = getDb()
+    let target: any = {}
+    
+    if (body.target_schedule_id) {
+      const schedule = db.prepare(`
+        SELECT s.*,
+               er.name as exam_room_name,
+               p.name as proctor_name,
+               sub.name as subject_name,
+               sl.name as skill_level_name
+        FROM exam_schedules s
+        JOIN exam_rooms er ON s.exam_room_id = er.id
+        JOIN proctors p ON s.proctor_id = p.id
+        JOIN subjects sub ON s.subject_id = sub.id
+        JOIN skill_levels sl ON s.skill_level_id = sl.id
+        WHERE s.id = ?
+      `).get(body.target_schedule_id) as any
+      if (!schedule) {
+        res.status(404).json({ success: false, error: '排考不存在' })
+        return
+      }
+      target = {
+        schedule_id: schedule.id,
+        batch_id: schedule.batch_id,
+        exam_room_id: schedule.exam_room_id,
+        exam_room_name: schedule.exam_room_name,
+        proctor_id: schedule.proctor_id,
+        proctor_name: schedule.proctor_name,
+        subject_id: schedule.subject_id,
+        subject_name: schedule.subject_name,
+        skill_level_id: schedule.skill_level_id,
+        skill_level_name: schedule.skill_level_name,
+        exam_date: schedule.exam_date,
+        start_time: schedule.start_time,
+        end_time: schedule.end_time,
+        capacity: schedule.capacity,
+      }
+    } else {
+      target = {
+        exam_room_id: rawTarget.exam_room_id || rawTarget.examRoom || rawTarget.exam_room,
+        exam_date: rawTarget.exam_date || rawTarget.examDate,
+        start_time: rawTarget.start_time || rawTarget.examTime || rawTarget.startTime,
+        end_time: rawTarget.end_time || rawTarget.endTime,
+        subject_id: rawTarget.subject_id || rawTarget.subject,
+        skill_level_id: rawTarget.skill_level_id || rawTarget.skill_level || rawTarget.skillLevel,
+        proctor_id: rawTarget.proctor_id || rawTarget.proctorId || rawTarget.proctor,
+      }
     }
     if (!registration_ids || !target) {
       res.status(400).json({ success: false, error: '缺少必要参数' })
       return
     }
-    const db = getDb()
     const placeholders = registration_ids.map(() => '?').join(',')
     const candidates = db.prepare(`
       SELECT

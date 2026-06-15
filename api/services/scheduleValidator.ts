@@ -43,6 +43,7 @@ interface ValidateAllOptions {
   skipProctor?: boolean
   skipCrossBatch?: boolean
   skipFrozen?: boolean
+  skipDuplicateSeat?: boolean
 }
 
 class ScheduleValidator {
@@ -106,23 +107,36 @@ class ScheduleValidator {
         errors.push(`考生 ${c.candidate_name} 报考等级为 ${c.skill_level_name}，与目标场次等级 ${targetLevel?.name} 不匹配`)
       }
     })
+
+    const targetStart = dayjs(`${target.exam_date} ${target.start_time}`)
+    const targetEnd = dayjs(`${target.exam_date} ${target.end_time}`)
+
     const conflictStmt = this.db.prepare(`
-      SELECT sa.id, s.exam_date, s.start_time, s.end_time, sub.name as subject_name, sub.type as subject_type
+      SELECT sa.id, s.id as schedule_id, s.exam_date, s.start_time, s.end_time, sub.name as subject_name, sub.type as subject_type, r.name as room_name
       FROM seat_arrangements sa
       JOIN exam_schedules s ON sa.schedule_id = s.id
       JOIN subjects sub ON s.subject_id = sub.id
+      JOIN exam_rooms r ON s.exam_room_id = r.id
       WHERE sa.candidate_id = ?
         AND sa.status != 'cancelled'
         AND s.exam_date = ?
-        AND (? NOT IN (s.start_time, s.end_time) OR s.id != ?)
-        AND s.id != COALESCE(?, '')
+        AND s.status = 'confirmed'
     `)
     candidates.forEach((c) => {
-      const conflicts = conflictStmt.all(c.candidate_id, target.exam_date, target.start_time, target.schedule_id || '', excludeScheduleId || '') as any[]
+      const conflicts = conflictStmt.all(c.candidate_id, target.exam_date) as any[]
       conflicts.forEach((conflict) => {
-        if (conflict.subject_type === targetSubject?.type) {
-          errors.push(`考生 ${c.candidate_name} 在 ${target.exam_date} ${conflict.start_time}-${conflict.end_time} ` +
-            `已有 ${conflict.subject_name} 考试安排，与目标场次时间冲突`)
+        const conflictStart = dayjs(`${conflict.exam_date} ${conflict.start_time}`)
+        const conflictEnd = dayjs(`${conflict.exam_date} ${conflict.end_time}`)
+        const hasOverlap = targetStart.isBefore(conflictEnd) && targetEnd.isAfter(conflictStart)
+
+        if (hasOverlap && conflict.subject_type === targetSubject?.type) {
+          const isSameSchedule = conflict.schedule_id === target.schedule_id
+          if (isSameSchedule) {
+            errors.push(`考生 ${c.candidate_name} 在目标场次 (${conflict.room_name}) 已有 ${conflict.subject_name} 座位安排，不可重复安排`)
+          } else {
+            errors.push(`考生 ${c.candidate_name} 在 ${target.exam_date} ${conflict.start_time}-${conflict.end_time} ` +
+              `已有 ${conflict.subject_name} (${conflict.room_name}) 考试安排，与目标场次时间完全重叠`)
+          }
         }
       })
     })
@@ -216,28 +230,36 @@ class ScheduleValidator {
     const targetStart = dayjs(`${target.exam_date} ${target.start_time}`)
     const targetEnd = dayjs(`${target.exam_date} ${target.end_time}`)
     const stmt = this.db.prepare(`
-      SELECT sa.id, s.exam_date, s.start_time, s.end_time, sub.name as subject_name, b.name as batch_name
+      SELECT sa.id, s.id as schedule_id, s.exam_date, s.start_time, s.end_time, sub.name as subject_name, b.name as batch_name, r.name as room_name
       FROM seat_arrangements sa
       JOIN exam_schedules s ON sa.schedule_id = s.id
       JOIN exam_batches b ON s.batch_id = b.id
       JOIN subjects sub ON s.subject_id = sub.id
+      JOIN exam_rooms r ON s.exam_room_id = r.id
       WHERE sa.candidate_id = ?
         AND sa.status != 'cancelled'
-        AND s.id != COALESCE(?, '')
+        AND s.exam_date = ?
+        AND s.status = 'confirmed'
     `)
     candidates.forEach((c) => {
-      const existing = stmt.all(c.candidate_id, target.schedule_id || '') as any[]
+      const existing = stmt.all(c.candidate_id, target.exam_date) as any[]
       existing.forEach((e) => {
         const eStart = dayjs(`${e.exam_date} ${e.start_time}`)
         const eEnd = dayjs(`${e.exam_date} ${e.end_time}`)
         const diffMinutes = Math.abs(targetStart.diff(eEnd, 'minute'))
-        if (diffMinutes < 30 && diffMinutes > 0) {
+        const isSameSchedule = e.schedule_id === target.schedule_id
+
+        if (!isSameSchedule && diffMinutes < 30 && diffMinutes > 0) {
           warnings.push(`考生 ${c.candidate_name} 在 ${e.batch_name} 结束时间 ${e.end_time} ` +
             `与本场次开始时间间隔不足30分钟，请注意转场时间`)
         }
         if (targetStart.isBefore(eEnd) && targetEnd.isAfter(eStart)) {
-          errors.push(`考生 ${c.candidate_name} 在 ${e.exam_date} ${e.start_time}-${e.end_time} ` +
-            `已有 ${e.subject_name} (${e.batch_name}) 考试，与本场次时间完全冲突`)
+          if (isSameSchedule) {
+            errors.push(`考生 ${c.candidate_name} 在目标场次 (${e.room_name}) 已有 ${e.subject_name} 座位安排，不可重复安排`)
+          } else {
+            errors.push(`考生 ${c.candidate_name} 在 ${e.exam_date} ${e.start_time}-${e.end_time} ` +
+              `已有 ${e.subject_name} (${e.batch_name}, ${e.room_name}) 考试，与本场次时间完全冲突`)
+          }
         }
       })
     })
@@ -255,6 +277,91 @@ class ScheduleValidator {
     return { valid: errors.length === 0, errors, warnings }
   }
 
+  validateDuplicateSeat(candidates: CandidateInfo[], target: ScheduleTarget): ValidationResult {
+    const errors: string[] = []
+    const warnings: string[] = []
+    const targetStart = dayjs(`${target.exam_date} ${target.start_time}`)
+    const targetEnd = dayjs(`${target.exam_date} ${target.end_time}`)
+
+    const targetScheduleStmt = this.db.prepare(`
+      SELECT sa.id, sa.registration_id, sa.candidate_id, sa.seat_no,
+             c.name as candidate_name, sub.name as subject_name
+      FROM seat_arrangements sa
+      JOIN candidates c ON sa.candidate_id = c.id
+      JOIN exam_schedules s ON sa.schedule_id = s.id
+      JOIN subjects sub ON s.subject_id = sub.id
+      WHERE sa.schedule_id = ?
+        AND sa.status != 'cancelled'
+        AND (sa.registration_id = ? OR sa.candidate_id = ?)
+    `)
+
+    const sameTimeStmt = this.db.prepare(`
+      SELECT sa.id, sa.registration_id, sa.candidate_id, sa.seat_no,
+             s.id as schedule_id, s.exam_date, s.start_time, s.end_time,
+             c.name as candidate_name, sub.name as subject_name, r.name as room_name
+      FROM seat_arrangements sa
+      JOIN candidates c ON sa.candidate_id = c.id
+      JOIN exam_schedules s ON sa.schedule_id = s.id
+      JOIN subjects sub ON s.subject_id = sub.id
+      JOIN exam_rooms r ON s.exam_room_id = r.id
+      WHERE sa.status != 'cancelled'
+        AND s.exam_date = ?
+        AND s.id != ?
+        AND (sa.registration_id = ? OR sa.candidate_id = ?)
+    `)
+
+    candidates.forEach((c) => {
+      const targetConflicts = targetScheduleStmt.all(target.schedule_id || '', c.registration_id, c.candidate_id) as any[]
+      targetConflicts.forEach((conflict) => {
+        if (conflict.registration_id === c.registration_id) {
+          errors.push(`报名 ${c.registration_id} (${c.candidate_name}) 在目标场次中已有座位 ${conflict.seat_no}，不可重复安排`)
+        }
+        if (conflict.candidate_id === c.candidate_id && conflict.registration_id !== c.registration_id) {
+          errors.push(`考生 ${c.candidate_name} 在目标场次中已有座位 ${conflict.seat_no}（报名号 ${conflict.registration_id}），同一考生不可重复安排`)
+        }
+      })
+
+      const sameTimeConflicts = sameTimeStmt.all(target.exam_date, target.schedule_id || '', c.registration_id, c.candidate_id) as any[]
+      sameTimeConflicts.forEach((conflict) => {
+        const conflictStart = dayjs(`${conflict.exam_date} ${conflict.start_time}`)
+        const conflictEnd = dayjs(`${conflict.exam_date} ${conflict.end_time}`)
+        const hasOverlap = targetStart.isBefore(conflictEnd) && targetEnd.isAfter(conflictStart)
+
+        if (hasOverlap) {
+          if (conflict.registration_id === c.registration_id) {
+            errors.push(`报名 ${c.registration_id} (${c.candidate_name}) 在 ${conflict.exam_date} ${conflict.start_time}-${conflict.end_time} ` +
+              `已有 ${conflict.subject_name} (${conflict.room_name} 座位 ${conflict.seat_no}) 考试安排，时间重叠，不可重复安排`)
+          }
+          if (conflict.candidate_id === c.candidate_id && conflict.registration_id !== c.registration_id) {
+            errors.push(`考生 ${c.candidate_name} 在 ${conflict.exam_date} ${conflict.start_time}-${conflict.end_time} ` +
+              `已有 ${conflict.subject_name} (${conflict.room_name} 座位 ${conflict.seat_no}) 考试安排，时间重叠，不可重复安排`)
+          }
+        }
+      })
+    })
+
+    const regIdMap = new Map<string, number>()
+    const candIdMap = new Map<string, number>()
+    candidates.forEach((c) => {
+      regIdMap.set(c.registration_id, (regIdMap.get(c.registration_id) || 0) + 1)
+      candIdMap.set(c.candidate_id, (candIdMap.get(c.candidate_id) || 0) + 1)
+    })
+    regIdMap.forEach((count, regId) => {
+      if (count > 1) {
+        const c = candidates.find(x => x.registration_id === regId)!
+        errors.push(`本次分配中报名 ${regId} (${c.candidate_name}) 被重复选择 ${count} 次`)
+      }
+    })
+    candIdMap.forEach((count, candId) => {
+      if (count > 1) {
+        const c = candidates.find(x => x.candidate_id === candId)!
+        errors.push(`本次分配中考生 ${c.candidate_name} (${candId}) 被重复选择 ${count} 次`)
+      }
+    })
+
+    return { valid: errors.length === 0, errors, warnings }
+  }
+
   validateAll(candidates: CandidateInfo[], target: ScheduleTarget, options: ValidateAllOptions = {}): ValidationResult {
     const allErrors: string[] = []
     const allWarnings: string[] = []
@@ -266,6 +373,7 @@ class ScheduleValidator {
       { name: 'proctor', fn: () => this.validateProctorQualification(target), skip: options.skipProctor },
       { name: 'crossBatch', fn: () => this.validateCrossBatchConflict(candidates, target), skip: options.skipCrossBatch },
       { name: 'frozen', fn: () => this.validateCandidateFrozen(candidates), skip: options.skipFrozen },
+      { name: 'duplicateSeat', fn: () => this.validateDuplicateSeat(candidates, target), skip: options.skipDuplicateSeat },
     ]
     validators.forEach(({ name, fn, skip }) => {
       if (!skip) {
