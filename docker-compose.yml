@@ -1,0 +1,18 @@
+version: "3.8"
+
+services:
+  exam-scheduler:
+    build: .
+    ports:
+      - "18287:3001"
+    volumes:
+      - exam-data:/app/data
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - DATABASE_PATH=/app/data/exam_scheduler.db
+      - JWT_SECRET=exam-system-docker-secret-2024
+    restart: unless-stopped
+
+volumes:
+  exam-data:

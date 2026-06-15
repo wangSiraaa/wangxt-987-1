@@ -1,0 +1,8 @@
+node_modules
+dist
+dist-api
+data
+.git
+.env
+*.md
+.trae-preflight.json
