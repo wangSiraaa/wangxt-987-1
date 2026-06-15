@@ -17,6 +17,7 @@ import institutionRoutes from './routes/institution.js'
 import registrationRoutes from './routes/registration.js'
 import scheduleRoutes from './routes/schedule.js'
 import checkinRoutes from './routes/checkin.js'
+import examDayChangesRoutes from './routes/examDayChanges.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -34,6 +35,7 @@ app.use('/api/institutions', institutionRoutes)
 app.use('/api/registrations', registrationRoutes)
 app.use('/api/schedules', scheduleRoutes)
 app.use('/api/checkin', checkinRoutes)
+app.use('/api/exam-day-changes', examDayChangesRoutes)
 
 app.use(
   '/api/health',

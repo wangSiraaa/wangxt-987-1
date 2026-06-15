@@ -44,6 +44,10 @@ interface ValidateAllOptions {
   skipCrossBatch?: boolean
   skipFrozen?: boolean
   skipDuplicateSeat?: boolean
+  skipProctorConflict?: boolean
+  skipCheckedInProtection?: boolean
+  allowLatePayment?: boolean
+  isReschedule?: boolean
 }
 
 class ScheduleValidator {
@@ -366,14 +370,17 @@ class ScheduleValidator {
     const allErrors: string[] = []
     const allWarnings: string[] = []
     const validators = [
-      { name: 'payment', fn: () => this.validatePayment(candidates), skip: options.skipPayment },
+      { name: 'payment', fn: () => options.allowLatePayment ? this.validateLatePayment(candidates, true) : this.validatePayment(candidates), skip: options.skipPayment },
       { name: 'idCard', fn: () => this.validateIdCardDuplicate(candidates), skip: options.skipIdCard },
       { name: 'subject', fn: () => this.validateSubjectConflict(candidates, target), skip: options.skipSubject },
       { name: 'capacity', fn: () => this.validateRoomCapacity(target, candidates), skip: options.skipCapacity },
       { name: 'proctor', fn: () => this.validateProctorQualification(target), skip: options.skipProctor },
+      { name: 'proctorConflict', fn: () => this.validateProctorConflict(target, candidates), skip: options.skipProctorConflict },
       { name: 'crossBatch', fn: () => this.validateCrossBatchConflict(candidates, target), skip: options.skipCrossBatch },
       { name: 'frozen', fn: () => this.validateCandidateFrozen(candidates), skip: options.skipFrozen },
       { name: 'duplicateSeat', fn: () => this.validateDuplicateSeat(candidates, target), skip: options.skipDuplicateSeat },
+      { name: 'checkedInProtection', fn: () => this.validateCheckedInProtection(target, candidates, options.isReschedule), skip: options.skipCheckedInProtection },
+      { name: 'accessibility', fn: () => this.validateAccessibilityRequirements(target, candidates), skip: false },
     ]
     validators.forEach(({ name, fn, skip }) => {
       if (!skip) {
@@ -387,6 +394,104 @@ class ScheduleValidator {
       errors: allErrors,
       warnings: allWarnings,
     }
+  }
+
+  validateProctorConflict(target: ScheduleTarget, candidates: CandidateInfo[]): ValidationResult {
+    const errors: string[] = []
+    const warnings: string[] = []
+    const conflictStmt = this.db.prepare(`
+      SELECT pc.conflict_type, pc.relationship,
+             c.name as candidate_name, c.id_card
+      FROM proctor_conflicts pc
+      JOIN candidates c ON pc.candidate_id = c.id
+      WHERE pc.proctor_id = ?
+        AND pc.candidate_id IN (${candidates.map(() => '?').join(',')})
+    `)
+    const candidateIds = candidates.map((c) => c.candidate_id)
+    const conflicts = conflictStmt.all(target.proctor_id, ...candidateIds) as any[]
+    conflicts.forEach((conflict) => {
+      errors.push(`监考老师与考生 ${conflict.candidate_name} (${conflict.id_card}) ` +
+        `存在${conflict.relationship}关系，需要回避`)
+    })
+    const instConflictStmt = this.db.prepare(`
+      SELECT DISTINCT c.name as candidate_name, c.id_card, i.name as institution_name
+      FROM proctors p
+      JOIN candidates c ON c.institution_id = p.institution_id
+      JOIN institutions i ON i.id = p.institution_id
+      WHERE p.id = ?
+        AND p.institution_id IS NOT NULL
+        AND c.id IN (${candidates.map(() => '?').join(',')})
+    `)
+    const instConflicts = instConflictStmt.all(target.proctor_id, ...candidateIds) as any[]
+    instConflicts.forEach((conflict) => {
+      warnings.push(`监考老师所属机构 ${conflict.institution_name} 与考生 ` +
+        `${conflict.candidate_name} (${conflict.id_card}) 所属机构相同，请注意回避`)
+    })
+    return { valid: errors.length === 0, errors, warnings }
+  }
+
+  validateCheckedInProtection(target: ScheduleTarget, candidates: CandidateInfo[], isReschedule: boolean = false): ValidationResult {
+    const errors: string[] = []
+    const warnings: string[] = []
+    if (!isReschedule || !target.schedule_id) {
+      return { valid: true, errors, warnings }
+    }
+    const checkedInStmt = this.db.prepare(`
+      SELECT sa.id, sa.seat_no, sa.checkin_status,
+             c.name as candidate_name, c.id_card
+      FROM seat_arrangements sa
+      JOIN candidates c ON sa.candidate_id = c.id
+      WHERE sa.schedule_id = ?
+        AND sa.status != 'cancelled'
+        AND sa.checkin_status = 'checked_in'
+    `)
+    const checkedIn = checkedInStmt.all(target.schedule_id) as any[]
+    const checkedInIds = checkedIn.map((s: any) => s.candidate_id)
+    candidates.forEach((c) => {
+      if (checkedInIds.includes(c.candidate_id)) {
+        const seat = checkedIn.find((s: any) => s.candidate_id === c.candidate_id)
+        warnings.push(`考生 ${c.candidate_name} (${c.id_card}) 已签到（座位 ${seat.seat_no}），重排时将保留其位置`)
+      }
+    })
+    return { valid: true, errors, warnings }
+  }
+
+  validateAccessibilityRequirements(target: ScheduleTarget, candidates: CandidateInfo[]): ValidationResult {
+    const errors: string[] = []
+    const warnings: string[] = []
+    const accessibilityStmt = this.db.prepare(`
+      SELECT aa.arrangement_type, aa.description, aa.extra_time_minutes,
+             c.name as candidate_name, c.id_card
+      FROM accessibility_arrangements aa
+      JOIN candidates c ON aa.candidate_id = c.id
+      WHERE aa.registration_id IN (${candidates.map(() => '?').join(',')})
+        AND aa.status IN ('requested', 'approved')
+    `)
+    const regIds = candidates.map((c) => c.registration_id)
+    const arrangements = accessibilityStmt.all(...regIds) as any[]
+    arrangements.forEach((arr) => {
+      if (arr.arrangement_type === 'wheelchair') {
+        warnings.push(`考生 ${arr.candidate_name} 需要无障碍通道座位，请安排靠近出入口的位置`)
+      }
+      if (arr.extra_time_minutes > 0) {
+        warnings.push(`考生 ${arr.candidate_name} 需要额外 ${arr.extra_time_minutes} 分钟考试时间`)
+      }
+    })
+    return { valid: true, errors, warnings }
+  }
+
+  validateLatePayment(candidates: CandidateInfo[], allowLatePayment: boolean = false): ValidationResult {
+    const errors: string[] = []
+    const warnings: string[] = []
+    if (allowLatePayment) {
+      candidates.forEach((c) => {
+        if (c.payment_status !== 'paid') {
+          warnings.push(`考生 ${c.candidate_name} (${c.id_card}) 为临考补缴，请注意核验缴费凭证`)
+        }
+      })
+      return { valid: true, errors, warnings }
+    }
+    return this.validatePayment(candidates)
   }
 
   validateScheduleCreation(target: ScheduleTarget): ValidationResult {

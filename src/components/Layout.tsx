@@ -1,6 +1,6 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/stores/authStore'
-import { LayoutDashboard, Users, ClipboardList, CalendarDays, AlertTriangle, FileText, Unlock, LogOut, Menu, X } from 'lucide-react'
+import { LayoutDashboard, Users, ClipboardList, CalendarDays, AlertTriangle, FileText, Unlock, LogOut, Menu, X, Clock, Wrench, UserCheck, Eye, Ban, History, Accessibility } from 'lucide-react'
 import { useState } from 'react'
 
 const adminLinks = [
@@ -8,6 +8,13 @@ const adminLinks = [
   { to: '/admin/batches', icon: CalendarDays, label: '考试批次' },
   { to: '/admin/schedules', icon: ClipboardList, label: '排考管理' },
   { to: '/admin/pending', icon: Users, label: '待分配名单' },
+  { to: '/admin/exam-day-changes', icon: Clock, label: '临考变更' },
+  { to: '/admin/deferrals', icon: Eye, label: '缓考审批' },
+  { to: '/admin/equipment-failures', icon: Wrench, label: '设备故障' },
+  { to: '/admin/proctor-conflicts', icon: UserCheck, label: '监考回避' },
+  { to: '/admin/accessibility', icon: Accessibility, label: '无障碍安排' },
+  { to: '/admin/cheating-reviews', icon: Ban, label: '作弊复核' },
+  { to: '/admin/change-logs', icon: History, label: '变更日志' },
   { to: '/admin/exceptions', icon: AlertTriangle, label: '异常记录' },
   { to: '/admin/makeup', icon: FileText, label: '补考管理' },
   { to: '/admin/score-unlocks', icon: Unlock, label: '成绩解锁' },

@@ -149,6 +149,165 @@ export interface CheckinRecord {
   status: string
 }
 
+export interface DeferralRequest {
+  id: string
+  registration_id: string
+  candidate_id: string
+  candidate_name?: string
+  original_schedule_id: string
+  original_schedule_name?: string
+  reason: string
+  evidence: string | null
+  requested_by: string
+  requested_at: string
+  approved_by: string | null
+  approved_at: string | null
+  status: 'pending' | 'approved' | 'rejected'
+  new_schedule_id: string | null
+  remarks: string | null
+}
+
+export interface EquipmentFailure {
+  id: string
+  schedule_id: string
+  schedule_name?: string
+  room_id: string
+  room_name?: string
+  equipment_type: string
+  description: string
+  reported_by: string
+  reported_at: string
+  status: 'reported' | 'confirmed' | 'transferred' | 'resolved'
+  transfer_to_room_id: string | null
+  transfer_to_room_name?: string
+  transferred_at: string | null
+  resolved_at: string | null
+  resolved_by: string | null
+  remarks: string | null
+}
+
+export interface ProctorReplacement {
+  id: string
+  schedule_id: string
+  schedule_name?: string
+  original_proctor_id: string
+  original_proctor_name?: string
+  new_proctor_id: string
+  new_proctor_name?: string
+  reason: string
+  conflict_type?: string
+  replaced_by: string
+  replaced_at: string
+}
+
+export interface ProctorConflict {
+  id: string
+  proctor_id: string
+  proctor_name?: string
+  candidate_id: string
+  candidate_name?: string
+  conflict_type: 'family' | 'colleague' | 'institution' | 'other'
+  relationship: string
+  status: 'active' | 'inactive'
+  created_at: string
+  updated_at: string
+}
+
+export interface ProctorConflictCheckResult {
+  hasConflict: boolean
+  conflictType?: 'existing_relationship' | 'schedule_conflict'
+  message?: string
+  schedules?: any[]
+}
+
+export interface AccessibilityArrangement {
+  id: string
+  schedule_id: string | null
+  registration_id: string
+  candidate_id: string
+  candidate_name?: string
+  arrangement_type: 'wheelchair' | 'visual_impairment' | 'hearing_impairment' | 'learning_disability' | 'extra_time' | 'reader' | 'scribe' | 'other'
+  description: string | null
+  requirements: string | null
+  seat_no: string | null
+  remarks: string | null
+  status: 'pending' | 'scheduled' | 'completed' | 'cancelled' | 'requested' | 'approved' | 'provided'
+  requested_by: string
+  requested_at: string
+  approved_by: string | null
+  approved_at: string | null
+  equipment_required: string | null
+  extra_time_minutes: number
+  created_at: string
+  updated_at: string
+}
+
+export interface CheatingReview {
+  id: string
+  registration_id: string
+  candidate_id: string
+  candidate_name?: string
+  schedule_id: string
+  schedule_name?: string
+  report_reason: string
+  evidence: string | null
+  reported_by: string
+  reported_at: string
+  status: 'pending' | 'reviewing' | 'sustained' | 'dismissed'
+  review_notes: string | null
+  review_remarks?: string | null
+  reviewed_by: string | null
+  reviewed_at: string | null
+  penalty: string | null
+  score_unlocked: boolean
+}
+
+export interface HalfExamState {
+  id: string
+  registration_id: string
+  candidate_id: string
+  candidate_name?: string
+  schedule_id: string
+  theory_exam_date: string
+  theory_score: number | null
+  theory_status: 'completed' | 'absent' | 'cheating'
+  practical_schedule_id: string | null
+  practical_exam_date: string | null
+  practical_status: 'pending' | 'completed' | 'absent' | 'cheating'
+  practical_score: number | null
+  overall_status: 'theory_done' | 'in_progress' | 'completed'
+  created_at: string
+  updated_at: string
+}
+
+export interface MakeupInheritance {
+  id: string
+  original_registration_id: string
+  makeup_registration_id: string
+  candidate_id: string
+  candidate_name?: string
+  reason: string
+  inheritance_type: 'deferral' | 'absence' | 'failure' | 'other'
+  preserves_disciplinary_record: boolean
+  disciplinary_notes: string | null
+  created_at: string
+}
+
+export interface ExamChangeLog {
+  id: string
+  schedule_id: string
+  schedule_name?: string
+  change_type: string
+  registration_id: string | null
+  candidate_id: string | null
+  candidate_name?: string
+  old_value: string | null
+  new_value: string | null
+  reason: string
+  changed_by: string
+  created_at: string
+}
+
 export interface MasterData {
   skillLevels: { value: string; label: string }[]
   subjects: { value: string; label: string }[]
@@ -170,8 +329,19 @@ interface DataState {
   masterData: MasterData
   checkinRecords: CheckinRecord[]
   checkinStats: { total: number; checkedIn: number; absent: number } | null
+  deferralRequests: DeferralRequest[]
+  equipmentFailures: EquipmentFailure[]
+  proctorReplacements: ProctorReplacement[]
+  proctorConflicts: ProctorConflict[]
+  accessibilityArrangements: AccessibilityArrangement[]
+  cheatingReviews: CheatingReview[]
+  halfExamStates: HalfExamState[]
+  makeupInheritances: MakeupInheritance[]
+  examChangeLogs: ExamChangeLog[]
   loading: boolean
   error: string | null
+
+  unlockScore: (id: string, reviewNotes: string, reviewer?: string) => Promise<boolean>
 
   fetchInstitutions: () => Promise<void>
   fetchCandidates: (instId: string) => Promise<void>
@@ -209,6 +379,35 @@ interface DataState {
   updateCandidate: (instId: string, candidateId: string, data: Partial<Candidate>) => Promise<boolean>
   deleteCandidate: (instId: string, candidateId: string) => Promise<boolean>
   createInstitution: (data: Partial<Institution>) => Promise<boolean>
+
+  latePaymentReschedule: (scheduleId: string, registrationIds: string[], reason: string) => Promise<{ success: boolean; data?: any; errors?: string[]; warnings?: string[] }>
+  submitDeferralRequest: (data: Partial<DeferralRequest>) => Promise<boolean>
+  approveDeferral: (id: string, newScheduleId: string, remarks: string) => Promise<boolean>
+  rejectDeferral: (id: string, remarks: string) => Promise<boolean>
+  fetchDeferralRequests: (filters?: Record<string, string>) => Promise<void>
+  reportEquipmentFailure: (data: Partial<EquipmentFailure>) => Promise<boolean>
+  confirmEquipmentFailure: (id: string) => Promise<boolean>
+  transferEquipmentFailure: (id: string, toRoomId: string, reason: string) => Promise<boolean>
+  resolveEquipmentFailure: (id: string, remarks: string) => Promise<boolean>
+  fetchEquipmentFailures: (filters?: Record<string, string>) => Promise<void>
+  replaceProctor: (scheduleId: string, originalProctorId: string, newProctorId: string, reason: string, conflictType?: string) => Promise<boolean>
+  recordProctorConflict: (proctorId: string, candidateId: string, conflictType: string, relationship: string) => Promise<boolean>
+  deleteProctorConflict: (id: string) => Promise<boolean>
+  checkProctorConflict: (proctorId: string, candidateId: string) => Promise<ProctorConflictCheckResult | null>
+  fetchProctorConflicts: (filters?: Record<string, string>) => Promise<void>
+  fetchProctorReplacements: (filters?: Record<string, string>) => Promise<void>
+  createAccessibilityArrangement: (data: Partial<AccessibilityArrangement>) => Promise<boolean>
+  updateAccessibilityArrangement: (id: string, data: Partial<AccessibilityArrangement>) => Promise<boolean>
+  completeAccessibilityArrangement: (id: string, remarks?: string) => Promise<boolean>
+  fetchAccessibilityArrangements: (filters?: Record<string, string>) => Promise<void>
+  reportCheating: (data: Partial<CheatingReview>) => Promise<boolean>
+  reviewCheating: (id: string, status: string, reviewNotes: string, penalty?: string) => Promise<boolean>
+  fetchCheatingReviews: (filters?: Record<string, string>) => Promise<void>
+  updateHalfExamState: (data: Partial<HalfExamState>) => Promise<boolean>
+  fetchHalfExamStates: (filters?: Record<string, string>) => Promise<void>
+  createMakeupExamWithInheritance: (originalRegistrationId: string, reason: string, inheritanceType: string) => Promise<boolean>
+  fetchMakeupInheritances: (filters?: Record<string, string>) => Promise<void>
+  fetchExamChangeLogs: (filters?: Record<string, string>) => Promise<void>
 }
 
 const initialMasterData: MasterData = {
@@ -232,6 +431,15 @@ export const useDataStore = create<DataState>((set, get) => ({
   masterData: initialMasterData,
   checkinRecords: [],
   checkinStats: null,
+  deferralRequests: [],
+  equipmentFailures: [],
+  proctorReplacements: [],
+  proctorConflicts: [],
+  accessibilityArrangements: [],
+  cheatingReviews: [],
+  halfExamStates: [],
+  makeupInheritances: [],
+  examChangeLogs: [],
   loading: false,
   error: null,
 
@@ -539,5 +747,258 @@ export const useDataStore = create<DataState>((set, get) => ({
     const res = await api.post<Institution>('/institutions', data)
     if (res.success) { set({ loading: false }); return true }
     set({ error: res.error || '创建机构失败', loading: false }); return false
+  },
+
+  latePaymentReschedule: async (scheduleId, registrationIds, reason) => {
+    set({ loading: true, error: null })
+    const res = await api.post<any>('/exam-day-changes/late-payment-reschedule', {
+      schedule_id: scheduleId,
+      registration_ids: registrationIds,
+      reason
+    })
+    if (res.success) {
+      set({ loading: false })
+      return { success: true, data: res.data, warnings: res.data?.warnings || [] }
+    }
+    set({ error: res.error || '临考补缴排考失败', loading: false })
+    return { success: false, errors: res.errors || [res.error || '临考补缴排考失败'], warnings: res.warnings || [] }
+  },
+
+  submitDeferralRequest: async (data) => {
+    set({ loading: true, error: null })
+    const res = await api.post<DeferralRequest>('/exam-day-changes/deferral-request', data)
+    if (res.success) { set({ loading: false }); return true }
+    set({ error: res.error || '提交缓考申请失败', loading: false }); return false
+  },
+
+  approveDeferral: async (id, newScheduleId, remarks) => {
+    set({ loading: true, error: null })
+    const res = await api.post<any>(`/exam-day-changes/deferral/${id}/approve`, {
+      new_schedule_id: newScheduleId,
+      remarks
+    })
+    if (res.success) { set({ loading: false }); return true }
+    set({ error: res.error || '审批缓考申请失败', loading: false }); return false
+  },
+
+  rejectDeferral: async (id, remarks) => {
+    set({ loading: true, error: null })
+    const res = await api.post<any>(`/exam-day-changes/deferral/${id}/approve`, {
+      status: 'rejected',
+      remarks
+    })
+    if (res.success) { set({ loading: false }); return true }
+    set({ error: res.error || '驳回缓考申请失败', loading: false }); return false
+  },
+
+  fetchDeferralRequests: async (filters) => {
+    set({ loading: true, error: null })
+    const qs = filters ? '?' + new URLSearchParams(filters).toString() : ''
+    const res = await api.get<DeferralRequest[]>(`/exam-day-changes/deferral-requests${qs}`)
+    if (res.success && res.data) set({ deferralRequests: res.data, loading: false })
+    else set({ error: res.error || '获取缓考申请列表失败', loading: false })
+  },
+
+  reportEquipmentFailure: async (data) => {
+    set({ loading: true, error: null })
+    const res = await api.post<EquipmentFailure>('/exam-day-changes/equipment-failure', data)
+    if (res.success) { set({ loading: false }); return true }
+    set({ error: res.error || '上报设备故障失败', loading: false }); return false
+  },
+
+  confirmEquipmentFailure: async (id) => {
+    set({ loading: true, error: null })
+    const res = await api.post<any>(`/exam-day-changes/equipment-failure/${id}/confirm`, {})
+    if (res.success) { set({ loading: false }); return true }
+    set({ error: res.error || '确认设备故障失败', loading: false }); return false
+  },
+
+  transferEquipmentFailure: async (id, toRoomId, reason) => {
+    set({ loading: true, error: null })
+    const res = await api.post<any>(`/exam-day-changes/equipment-failure/${id}/transfer`, {
+      to_room_id: toRoomId,
+      reason
+    })
+    if (res.success) { set({ loading: false }); return true }
+    set({ error: res.error || '设备故障转场失败', loading: false }); return false
+  },
+
+  resolveEquipmentFailure: async (id, remarks) => {
+    set({ loading: true, error: null })
+    const res = await api.post<any>(`/exam-day-changes/equipment-failure/${id}/resolve`, { remarks })
+    if (res.success) { set({ loading: false }); return true }
+    set({ error: res.error || '解决设备故障失败', loading: false }); return false
+  },
+
+  fetchEquipmentFailures: async (filters) => {
+    set({ loading: true, error: null })
+    const qs = filters ? '?' + new URLSearchParams(filters).toString() : ''
+    const res = await api.get<EquipmentFailure[]>(`/exam-day-changes/equipment-failures${qs}`)
+    if (res.success && res.data) set({ equipmentFailures: res.data, loading: false })
+    else set({ error: res.error || '获取设备故障列表失败', loading: false })
+  },
+
+  replaceProctor: async (scheduleId, originalProctorId, newProctorId, reason, conflictType) => {
+    set({ loading: true, error: null })
+    const res = await api.post<ProctorReplacement>('/exam-day-changes/proctor-replace', {
+      schedule_id: scheduleId,
+      original_proctor_id: originalProctorId,
+      new_proctor_id: newProctorId,
+      reason,
+      conflict_type: conflictType
+    })
+    if (res.success) { set({ loading: false }); return true }
+    set({ error: res.error || '替换监考失败', loading: false }); return false
+  },
+
+  recordProctorConflict: async (proctorId, candidateId, conflictType, relationship) => {
+    set({ loading: true, error: null })
+    const res = await api.post<ProctorConflict>('/exam-day-changes/proctor-conflict', {
+      proctor_id: proctorId,
+      candidate_id: candidateId,
+      conflict_type: conflictType,
+      relationship
+    })
+    if (res.success) { set({ loading: false }); return true }
+    set({ error: res.error || '记录监考回避关系失败', loading: false }); return false
+  },
+
+  deleteProctorConflict: async (id) => {
+    set({ loading: true, error: null })
+    const res = await api.del(`/exam-day-changes/proctor-conflicts/${id}`)
+    if (res.success) { set({ loading: false }); return true }
+    set({ error: res.error || '删除回避关系失败', loading: false }); return false
+  },
+
+  checkProctorConflict: async (proctorId, candidateId) => {
+    set({ loading: true, error: null })
+    const res = await api.get<ProctorConflictCheckResult>(
+      `/exam-day-changes/proctor-conflicts/check?proctor_id=${proctorId}&candidate_id=${candidateId}`
+    )
+    if (res.success && res.data) { set({ loading: false }); return res.data }
+    set({ error: res.error || '冲突检测失败', loading: false }); return null
+  },
+
+  fetchProctorConflicts: async (filters) => {
+    set({ loading: true, error: null })
+    const qs = filters ? '?' + new URLSearchParams(filters).toString() : ''
+    const res = await api.get<ProctorConflict[]>(`/exam-day-changes/proctor-conflicts${qs}`)
+    if (res.success && res.data) set({ proctorConflicts: res.data, loading: false })
+    else set({ error: res.error || '获取监考回避关系列表失败', loading: false })
+  },
+
+  fetchProctorReplacements: async (filters) => {
+    set({ loading: true, error: null })
+    const qs = filters ? '?' + new URLSearchParams(filters).toString() : ''
+    const res = await api.get<ProctorReplacement[]>(`/exam-day-changes/proctor-replacements${qs}`)
+    if (res.success && res.data) set({ proctorReplacements: res.data, loading: false })
+    else set({ error: res.error || '获取监考替换记录列表失败', loading: false })
+  },
+
+  createAccessibilityArrangement: async (data) => {
+    set({ loading: true, error: null })
+    const res = await api.post<AccessibilityArrangement>('/exam-day-changes/accessibility-arrangement', data)
+    if (res.success) { set({ loading: false }); return true }
+    set({ error: res.error || '创建无障碍考试安排失败', loading: false }); return false
+  },
+
+  updateAccessibilityArrangement: async (id, data) => {
+    set({ loading: true, error: null })
+    const res = await api.put<AccessibilityArrangement>(`/exam-day-changes/accessibility-arrangement/${id}`, data)
+    if (res.success) { set({ loading: false }); return true }
+    set({ error: res.error || '更新无障碍考试安排失败', loading: false }); return false
+  },
+
+  completeAccessibilityArrangement: async (id, remarks) => {
+    set({ loading: true, error: null })
+    const res = await api.post<any>(`/exam-day-changes/accessibility-arrangement/${id}/complete`, { remarks })
+    if (res.success) { set({ loading: false }); return true }
+    set({ error: res.error || '标记无障碍考试安排完成失败', loading: false }); return false
+  },
+
+  fetchAccessibilityArrangements: async (filters) => {
+    set({ loading: true, error: null })
+    const qs = filters ? '?' + new URLSearchParams(filters).toString() : ''
+    const res = await api.get<AccessibilityArrangement[]>(`/exam-day-changes/accessibility-arrangements${qs}`)
+    if (res.success && res.data) set({ accessibilityArrangements: res.data, loading: false })
+    else set({ error: res.error || '获取无障碍考试安排列表失败', loading: false })
+  },
+
+  reportCheating: async (data) => {
+    set({ loading: true, error: null })
+    const res = await api.post<CheatingReview>('/exam-day-changes/cheating-report', data)
+    if (res.success) { set({ loading: false }); return true }
+    set({ error: res.error || '上报作弊失败', loading: false }); return false
+  },
+
+  reviewCheating: async (id, status, reviewNotes, penalty) => {
+    set({ loading: true, error: null })
+    const res = await api.post<any>(`/exam-day-changes/cheating-review/${id}`, {
+      status,
+      review_notes: reviewNotes,
+      penalty
+    })
+    if (res.success) { set({ loading: false }); return true }
+    set({ error: res.error || '作弊复核失败', loading: false }); return false
+  },
+
+  fetchCheatingReviews: async (filters) => {
+    set({ loading: true, error: null })
+    const qs = filters ? '?' + new URLSearchParams(filters).toString() : ''
+    const res = await api.get<CheatingReview[]>(`/exam-day-changes/cheating-reviews${qs}`)
+    if (res.success && res.data) set({ cheatingReviews: res.data, loading: false })
+    else set({ error: res.error || '获取作弊复核列表失败', loading: false })
+  },
+
+  updateHalfExamState: async (data) => {
+    set({ loading: true, error: null })
+    const res = await api.post<HalfExamState>('/exam-day-changes/half-exam-state', data)
+    if (res.success) { set({ loading: false }); return true }
+    set({ error: res.error || '更新半程考试状态失败', loading: false }); return false
+  },
+
+  fetchHalfExamStates: async (filters) => {
+    set({ loading: true, error: null })
+    const qs = filters ? '?' + new URLSearchParams(filters).toString() : ''
+    const res = await api.get<HalfExamState[]>(`/exam-day-changes/half-exam-states${qs}`)
+    if (res.success && res.data) set({ halfExamStates: res.data, loading: false })
+    else set({ error: res.error || '获取半程考试状态列表失败', loading: false })
+  },
+
+  createMakeupExamWithInheritance: async (originalRegistrationId, reason, inheritanceType) => {
+    set({ loading: true, error: null })
+    const res = await api.post<MakeupInheritance>('/exam-day-changes/makeup-exam-with-inheritance', {
+      original_registration_id: originalRegistrationId,
+      reason,
+      inheritance_type: inheritanceType
+    })
+    if (res.success) { set({ loading: false }); return true }
+    set({ error: res.error || '创建补考继承链失败', loading: false }); return false
+  },
+
+  fetchMakeupInheritances: async (filters) => {
+    set({ loading: true, error: null })
+    const qs = filters ? '?' + new URLSearchParams(filters).toString() : ''
+    const res = await api.get<MakeupInheritance[]>(`/exam-day-changes/makeup-inheritances${qs}`)
+    if (res.success && res.data) set({ makeupInheritances: res.data, loading: false })
+    else set({ error: res.error || '获取补考继承链列表失败', loading: false })
+  },
+
+  fetchExamChangeLogs: async (filters) => {
+    set({ loading: true, error: null })
+    const qs = filters ? '?' + new URLSearchParams(filters).toString() : ''
+    const res = await api.get<ExamChangeLog[]>(`/exam-day-changes/change-logs${qs}`)
+    if (res.success && res.data) set({ examChangeLogs: res.data, loading: false })
+    else set({ error: res.error || '获取变更日志列表失败', loading: false })
+  },
+
+  unlockScore: async (id, reviewNotes, reviewer) => {
+    set({ loading: true, error: null })
+    const res = await api.post<any>(`/exam-day-changes/cheating-review/${id}/unlock`, {
+      review_notes: reviewNotes,
+      reviewer,
+    })
+    if (res.success) { set({ loading: false }); return true }
+    set({ error: res.error || '成绩解锁失败', loading: false }); return false
   },
 }))

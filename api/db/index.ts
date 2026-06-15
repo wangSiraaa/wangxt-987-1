@@ -125,9 +125,16 @@ function initDatabase(db: Database.Database): void {
       status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'paid', 'rejected', 'cancelled')),
       payment_status TEXT DEFAULT 'unpaid' CHECK(payment_status IN ('unpaid', 'paid', 'refunded')),
       payment_amount REAL DEFAULT 0,
-      exam_status TEXT DEFAULT 'not_scheduled' CHECK(exam_status IN ('not_scheduled', 'scheduled', 'absent', 'cheating', 'passed', 'failed')),
+      exam_status TEXT DEFAULT 'not_scheduled' CHECK(exam_status IN ('not_scheduled', 'scheduled', 'absent', 'cheating', 'passed', 'failed', 'deferred', 'half_completed')),
       is_frozen INTEGER DEFAULT 0,
       freeze_reason TEXT,
+      is_cheating INTEGER DEFAULT 0,
+      cheating_notes TEXT,
+      cheating_review_id TEXT,
+      half_exam_state_id TEXT,
+      original_registration_id TEXT,
+      is_makeup INTEGER DEFAULT 0,
+      disciplinary_record TEXT,
       remark TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -220,9 +227,12 @@ function initDatabase(db: Database.Database): void {
       registration_id TEXT NOT NULL,
       candidate_id TEXT NOT NULL,
       seat_no TEXT NOT NULL,
-      status TEXT DEFAULT 'assigned' CHECK(status IN ('assigned', 'adjusted', 'cancelled')),
+      status TEXT DEFAULT 'assigned' CHECK(status IN ('assigned', 'adjusted', 'cancelled', 'transferred')),
       checkin_status TEXT DEFAULT 'pending' CHECK(checkin_status IN ('pending', 'checked_in', 'absent')),
       checkin_time TEXT,
+      is_accessibility INTEGER DEFAULT 0,
+      accessibility_type TEXT,
+      original_schedule_id TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (schedule_id) REFERENCES exam_schedules(id),
@@ -304,6 +314,184 @@ function initDatabase(db: Database.Database): void {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS deferral_requests (
+      id TEXT PRIMARY KEY,
+      registration_id TEXT NOT NULL,
+      candidate_id TEXT NOT NULL,
+      original_schedule_id TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      evidence TEXT,
+      requested_by TEXT NOT NULL,
+      requested_at TEXT NOT NULL,
+      approved_by TEXT,
+      approved_at TEXT,
+      status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
+      new_schedule_id TEXT,
+      remarks TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (registration_id) REFERENCES registrations(id),
+      FOREIGN KEY (candidate_id) REFERENCES candidates(id),
+      FOREIGN KEY (original_schedule_id) REFERENCES exam_schedules(id),
+      FOREIGN KEY (new_schedule_id) REFERENCES exam_schedules(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS equipment_failures (
+      id TEXT PRIMARY KEY,
+      exam_room_id TEXT NOT NULL,
+      schedule_id TEXT,
+      equipment_name TEXT NOT NULL,
+      failure_description TEXT NOT NULL,
+      reported_by TEXT NOT NULL,
+      reported_at TEXT NOT NULL,
+      handled_by TEXT,
+      handled_at TEXT,
+      resolution TEXT,
+      status TEXT DEFAULT 'reported' CHECK(status IN ('reported', 'investigating', 'transferred', 'resolved', 'cancelled')),
+      affected_candidate_count INTEGER DEFAULT 0,
+      transfer_to_room_id TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (exam_room_id) REFERENCES exam_rooms(id),
+      FOREIGN KEY (schedule_id) REFERENCES exam_schedules(id),
+      FOREIGN KEY (transfer_to_room_id) REFERENCES exam_rooms(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS proctor_replacements (
+      id TEXT PRIMARY KEY,
+      schedule_id TEXT NOT NULL,
+      original_proctor_id TEXT NOT NULL,
+      new_proctor_id TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      conflict_type TEXT NOT NULL CHECK(conflict_type IN ('relationship', 'institution', 'other')),
+      related_candidate_id TEXT,
+      replaced_by TEXT NOT NULL,
+      replaced_at TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (schedule_id) REFERENCES exam_schedules(id),
+      FOREIGN KEY (original_proctor_id) REFERENCES proctors(id),
+      FOREIGN KEY (new_proctor_id) REFERENCES proctors(id),
+      FOREIGN KEY (related_candidate_id) REFERENCES candidates(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS proctor_conflicts (
+      id TEXT PRIMARY KEY,
+      proctor_id TEXT NOT NULL,
+      candidate_id TEXT NOT NULL,
+      conflict_type TEXT NOT NULL CHECK(conflict_type IN ('family', 'colleague', 'student', 'institution', 'other')),
+      relationship TEXT NOT NULL,
+      status TEXT DEFAULT 'active' CHECK(status IN ('active', 'inactive')),
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (proctor_id) REFERENCES proctors(id),
+      FOREIGN KEY (candidate_id) REFERENCES candidates(id),
+      UNIQUE(proctor_id, candidate_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS accessibility_arrangements (
+      id TEXT PRIMARY KEY,
+      registration_id TEXT NOT NULL,
+      candidate_id TEXT NOT NULL,
+      schedule_id TEXT,
+      arrangement_type TEXT NOT NULL CHECK(arrangement_type IN ('wheelchair', 'visual_impairment', 'hearing_impairment', 'learning_disability', 'extra_time', 'reader', 'scribe', 'other')),
+      description TEXT,
+      requirements TEXT,
+      seat_no TEXT,
+      remarks TEXT,
+      equipment_required TEXT,
+      extra_time_minutes INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'scheduled', 'completed', 'cancelled', 'requested', 'approved', 'provided')),
+      requested_by TEXT,
+      requested_at TEXT,
+      approved_by TEXT,
+      approved_at TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (registration_id) REFERENCES registrations(id),
+      FOREIGN KEY (candidate_id) REFERENCES candidates(id),
+      FOREIGN KEY (schedule_id) REFERENCES exam_schedules(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS makeup_inheritances (
+      id TEXT PRIMARY KEY,
+      original_registration_id TEXT NOT NULL,
+      makeup_registration_id TEXT NOT NULL,
+      candidate_id TEXT NOT NULL,
+      subject_id TEXT NOT NULL,
+      reason TEXT NOT NULL CHECK(reason IN ('deferral', 'absent', 'failed', 'equipment_failure', 'other')),
+      inherited_fields TEXT NOT NULL,
+      has_disciplinary_record INTEGER DEFAULT 0,
+      disciplinary_notes TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (original_registration_id) REFERENCES registrations(id),
+      FOREIGN KEY (makeup_registration_id) REFERENCES registrations(id),
+      FOREIGN KEY (candidate_id) REFERENCES candidates(id),
+      FOREIGN KEY (subject_id) REFERENCES subjects(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS half_exam_states (
+      id TEXT PRIMARY KEY,
+      registration_id TEXT NOT NULL UNIQUE,
+      candidate_id TEXT NOT NULL,
+      subject_id TEXT NOT NULL,
+      theory_exam_status TEXT NOT NULL CHECK(theory_exam_status IN ('not_started', 'in_progress', 'completed', 'absent', 'cheating')),
+      theory_score REAL,
+      theory_exam_date TEXT,
+      practical_exam_status TEXT NOT NULL CHECK(practical_exam_status IN ('not_started', 'in_progress', 'completed', 'absent', 'cheating', 'deferred')),
+      practical_score REAL,
+      practical_exam_date TEXT,
+      practical_schedule_id TEXT,
+      overall_status TEXT NOT NULL CHECK(overall_status IN ('theory_done', 'practical_pending', 'both_done', 'incomplete')),
+      last_updated_by TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (registration_id) REFERENCES registrations(id),
+      FOREIGN KEY (candidate_id) REFERENCES candidates(id),
+      FOREIGN KEY (subject_id) REFERENCES subjects(id),
+      FOREIGN KEY (practical_schedule_id) REFERENCES exam_schedules(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS cheating_reviews (
+      id TEXT PRIMARY KEY,
+      registration_id TEXT NOT NULL,
+      candidate_id TEXT NOT NULL,
+      schedule_id TEXT NOT NULL,
+      reported_by TEXT NOT NULL,
+      reported_at TEXT NOT NULL,
+      description TEXT NOT NULL,
+      evidence TEXT,
+      initial_freeze INTEGER DEFAULT 1,
+      freeze_reason TEXT NOT NULL,
+      reviewer_id TEXT,
+      reviewed_at TEXT,
+      review_result TEXT DEFAULT 'pending' CHECK(review_result IN ('pending', 'confirmed_cheating', 'false_alarm', 'needs_investigation')),
+      final_decision TEXT DEFAULT 'null' CHECK(final_decision IN ('unfreeze', 'maintain_freeze', 'disqualify', 'null')),
+      decision_notes TEXT,
+      score_unlock_id TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (registration_id) REFERENCES registrations(id),
+      FOREIGN KEY (candidate_id) REFERENCES candidates(id),
+      FOREIGN KEY (schedule_id) REFERENCES exam_schedules(id),
+      FOREIGN KEY (score_unlock_id) REFERENCES score_unlocks(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS exam_change_logs (
+      id TEXT PRIMARY KEY,
+      schedule_id TEXT,
+      change_type TEXT NOT NULL CHECK(change_type IN ('seat_adjust', 'proctor_replace', 'room_transfer', 'deferral', 'accessibility', 'equipment_failure', 'late_payment', 'half_exam', 'cheating', 'proctor_conflict', 'other')),
+      registration_id TEXT,
+      candidate_id TEXT,
+      old_value TEXT,
+      new_value TEXT,
+      reason TEXT NOT NULL,
+      changed_by TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (schedule_id) REFERENCES exam_schedules(id),
+      FOREIGN KEY (registration_id) REFERENCES registrations(id),
+      FOREIGN KEY (candidate_id) REFERENCES candidates(id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_registrations_institution ON registrations(institution_id);
     CREATE INDEX IF NOT EXISTS idx_registrations_candidate ON registrations(candidate_id);
     CREATE INDEX IF NOT EXISTS idx_registrations_subject ON registrations(subject_id);
@@ -320,7 +508,33 @@ function initDatabase(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_checkin_candidate ON checkin_records(candidate_id);
     CREATE INDEX IF NOT EXISTS idx_exceptions_status ON exception_audits(status);
     CREATE INDEX IF NOT EXISTS idx_payments_registration ON payment_records(registration_id);
+    CREATE INDEX IF NOT EXISTS idx_deferrals_status ON deferral_requests(status);
+    CREATE INDEX IF NOT EXISTS idx_deferrals_registration ON deferral_requests(registration_id);
+    CREATE INDEX IF NOT EXISTS idx_equipment_status ON equipment_failures(status);
+    CREATE INDEX IF NOT EXISTS idx_equipment_room ON equipment_failures(exam_room_id);
+    CREATE INDEX IF NOT EXISTS idx_proctor_conflict_proctor ON proctor_conflicts(proctor_id);
+    CREATE INDEX IF NOT EXISTS idx_proctor_conflict_candidate ON proctor_conflicts(candidate_id);
+    CREATE INDEX IF NOT EXISTS idx_accessibility_registration ON accessibility_arrangements(registration_id);
+    CREATE INDEX IF NOT EXISTS idx_accessibility_status ON accessibility_arrangements(status);
+    CREATE INDEX IF NOT EXISTS idx_makeup_inheritance_original ON makeup_inheritances(original_registration_id);
+    CREATE INDEX IF NOT EXISTS idx_makeup_inheritance_makeup ON makeup_inheritances(makeup_registration_id);
+    CREATE INDEX IF NOT EXISTS idx_half_exam_registration ON half_exam_states(registration_id);
+    CREATE INDEX IF NOT EXISTS idx_half_exam_overall ON half_exam_states(overall_status);
+    CREATE INDEX IF NOT EXISTS idx_cheating_review_status ON cheating_reviews(review_result);
+    CREATE INDEX IF NOT EXISTS idx_cheating_review_registration ON cheating_reviews(registration_id);
+    CREATE INDEX IF NOT EXISTS idx_change_log_schedule ON exam_change_logs(schedule_id);
+    CREATE INDEX IF NOT EXISTS idx_change_log_type ON exam_change_logs(change_type);
   `)
+
+  const pragma = db.prepare("PRAGMA table_info(proctor_conflicts)").all() as { name: string }[]
+  const columns = pragma.map(c => c.name)
+  if (!columns.includes('status')) {
+    db.exec("ALTER TABLE proctor_conflicts ADD COLUMN status TEXT DEFAULT 'active' CHECK(status IN ('active', 'inactive'))")
+  }
+  if (!columns.includes('updated_at')) {
+    db.exec("ALTER TABLE proctor_conflicts ADD COLUMN updated_at TEXT DEFAULT CURRENT_TIMESTAMP")
+  }
+
   seedData()
 }
 

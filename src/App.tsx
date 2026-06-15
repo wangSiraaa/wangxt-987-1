@@ -11,6 +11,13 @@ import PendingList from '@/pages/admin/PendingList'
 import Exceptions from '@/pages/admin/Exceptions'
 import MakeupExams from '@/pages/admin/MakeupExams'
 import ScoreUnlocks from '@/pages/admin/ScoreUnlocks'
+import ExamDayChanges from '@/pages/admin/ExamDayChanges'
+import DeferralApprovals from '@/pages/admin/DeferralApprovals'
+import EquipmentFailures from '@/pages/admin/EquipmentFailures'
+import ProctorConflicts from '@/pages/admin/ProctorConflicts'
+import AccessibilityArrangements from '@/pages/admin/AccessibilityArrangements'
+import CheatingReviews from '@/pages/admin/CheatingReviews'
+import ChangeLogs from '@/pages/admin/ChangeLogs'
 import ProctorDashboard from '@/pages/proctor/Dashboard'
 import Checkin from '@/pages/proctor/Checkin'
 import ExceptionRegister from '@/pages/proctor/ExceptionRegister'
@@ -38,6 +45,13 @@ export default function App() {
           <Route path="batches" element={<Batches />} />
           <Route path="schedules" element={<Schedules />} />
           <Route path="pending" element={<PendingList />} />
+          <Route path="exam-day-changes" element={<ExamDayChanges />} />
+          <Route path="deferrals" element={<DeferralApprovals />} />
+          <Route path="equipment-failures" element={<EquipmentFailures />} />
+          <Route path="proctor-conflicts" element={<ProctorConflicts />} />
+          <Route path="accessibility" element={<AccessibilityArrangements />} />
+          <Route path="cheating-reviews" element={<CheatingReviews />} />
+          <Route path="change-logs" element={<ChangeLogs />} />
           <Route path="exceptions" element={<Exceptions />} />
           <Route path="makeup" element={<MakeupExams />} />
           <Route path="score-unlocks" element={<ScoreUnlocks />} />
